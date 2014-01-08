@@ -129,23 +129,29 @@ class Environment(dict):
 
         human_name = human_name or key
 
-        # expand env variables in `places` and split on colons
+        # expand env variables and globs in `places` and split on colons
         places = itertools.chain.from_iterable(os.path.expandvars(p).split(os.pathsep) for p in places)
+        places = map(glob, places)
+        places = list(itertools.chain.from_iterable(places)) # Flatten after globbing
         places = map(os.path.expanduser, places)
 
         print 'Searching for', human_name, '...',
+        results = []
         for p in places:
             for i in items:
                 path = os.path.join(p, i)
                 if os.path.exists(path):
                     result = path if join else p
                     print colorize(result, 'green')
-                    self[key] = result
-                    return result
+                    results += [result]
 
-        print colorize('FAILED', 'red')
-        raise Abort("%s not found. Searched in following places: %s" %
-                    (human_name, ''.join(['\n  - ' + p for p in places])))
+        if results:
+            self[key] = results
+            return results
+        else:
+            print colorize('FAILED', 'red')
+            raise Abort("%s not found. Searched in following places: %s" %
+                        (human_name, ''.join(['\n  - ' + p for p in places])))
 
     def find_dir(self, key, items, places, human_name=None):
         return self._find(key, items or ['.'], places, human_name, join=False)
@@ -185,26 +191,28 @@ class Environment(dict):
         if 'board_models' in self:
             return self['board_models']
 
-        boards_txt = self.find_arduino_file('boards.txt', ['hardware', 'arduino'], 
+        boards_txts =  self.find_arduino_file('boards.txt', ['hardware', '*'],
                                             human_name='Board description file (boards.txt)')
 
         self['board_models'] = BoardModels()
         self['board_models'].default = self.default_board_model
-        with open(boards_txt) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                multikey, val = line.split('=')
-                multikey = multikey.split('.')
 
-                subdict = self['board_models']
-                for key in multikey[:-1]:
-                    if key not in subdict:
-                        subdict[key] = {}
-                    subdict = subdict[key]
+        for boards_txt in boards_txts:
+            with open(boards_txt) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    multikey, val = line.split('=')
+                    multikey = multikey.split('.')
 
-                subdict[multikey[-1]] = val
+                    subdict = self['board_models']
+                    for key in multikey[:-1]:
+                        if key not in subdict:
+                            subdict[key] = {}
+                        subdict = subdict[key]
+
+                    subdict[multikey[-1]] = val
 
         return self['board_models']
 
